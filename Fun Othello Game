@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>Canvas オセロ</title>
+  <style>
+    canvas {
+      border: 1px solid black;
+      display: block;
+      margin: 10px auto;
+    }
+    #controls {
+      text-align: center;
+      margin-bottom: 10px;
+    }
+    .lang-button {
+      width: 100px;
+      height: 40px;
+      margin: 0 5px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .lang-button img {
+      width: 24px;
+      height: 24px;
+      margin-right: 5px;
+    }
+    #undoButton {
+      margin: 0 5px;
+      height: 40px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    #turnIndicator {
+      display: inline-block;
+      margin-left: 15px;
+      vertical-align: middle;
+      font-size: 16px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <button id="langJa" class="lang-button">
+      <img src="https://illustimage.com/photo/7591.png?20180916" alt="日本国旗">日本語
+    </button>
+    <button id="langEn" class="lang-button">
+      <img src="https://illustimage.com/photo/dl/7593.png?20180916" alt="イギリス国旗">English
+    </button>
+    <button id="undoButton">一手戻す</button>
+    <span id="turnIndicator"></span>
+  </div>
+  <canvas id="othelloCanvas" width="400" height="400"></canvas>
+  <script>
+    const canvas = document.getElementById('othelloCanvas');
+    const ctx = canvas.getContext('2d');
+    const size = 8;
+    const cellSize = canvas.width / size;
+    let board = Array.from({ length: size }, () => Array(size).fill(0));
+    const initialBoard = [
+      [0,0,0,0,0,0,0,0],
+      [0,0,0,0,0,0,0,0],
+      [0,0,0,0,0,0,0,0],
+      [0,0,0,2,1,0,0,0],
+      [0,0,0,1,2,0,0,0],
+      [0,0,0,0,0,0,0,0],
+      [0,0,0,0,0,0,0,0],
+      [0,0,0,0,0,0,0,0]
+    ];
+    board = initialBoard.map(row => row.slice());
+    let currentPlayer = 1; // 1=黒, 2=白
+    let currentLang = 'ja';
+    let history = [];
+
+    const texts = {
+      ja: { undo: '一手戻す' },
+      en: { undo: 'Undo' }
+    };
+
+    function drawBoard() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = 'green';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      // グリッド線（常に黒）
+      ctx.strokeStyle = 'black';
+      ctx.lineWidth = 1;
+      for (let i = 0; i <= size; i++) {
+        ctx.beginPath();
+        ctx.moveTo(i * cellSize, 0);
+        ctx.lineTo(i * cellSize, canvas.height);
+        ctx.moveTo(0, i * cellSize);
+        ctx.lineTo(canvas.width, i * cellSize);
+        ctx.stroke();
+      }
+      // 駒の描画
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          if (board[y][x] === 1) drawDisc(x, y, 'black');
+          else if (board[y][x] === 2) drawDiscOutline(x, y, 'black');
+        }
+      }
+      // 置ける場所を透明な〇で示す
+      drawPossibleMoves();
+    }
+
+    function drawDisc(x, y, color) {
+      ctx.beginPath();
+      ctx.arc(x * cellSize + cellSize / 2, y * cellSize + cellSize / 2, cellSize / 2 - 2, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+    }
+
+    function drawDiscOutline(x, y, strokeColor) {
+      ctx.beginPath();
+      ctx.arc(x * cellSize + cellSize / 2, y * cellSize + cellSize / 2, cellSize / 2 - 2, 0, Math.PI * 2);
+      ctx.fillStyle = 'white';
+      ctx.fill();
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    function drawPossibleMoves() {
+      ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+      ctx.lineWidth = 2;
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          if (isValidMove(x, y, currentPlayer)) {
+            ctx.beginPath();
+            ctx.arc(x * cellSize + cellSize / 2, y * cellSize + cellSize / 2, cellSize / 2 - 6, 0, Math.PI * 2);
+            ctx.stroke();
+          }
+        }
+      }
+    }
+
+    function getCell(e) {
+      const rect = canvas.getBoundingClientRect();
+      const x = Math.floor((e.clientX - rect.left) / cellSize);
+      const y = Math.floor((e.clientY - rect.top) / cellSize);
+      return { x, y };
+    }
+
+    function isValidMove(x, y, player) {
+      if (board[y][x] !== 0) return false;
+      const opponent = player === 1 ? 2 : 1;
+      const directions = [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
+      for (const [dx, dy] of directions) {
+        let nx = x + dx, ny = y + dy, hasOpponent = false;
+        while (nx >= 0 && ny >= 0 && nx < size && ny < size) {
+          if (board[ny][nx] === opponent) hasOpponent = true;
+          else if (board[ny][nx] === player) {
+            if (hasOpponent) return true;
+            break;
+          } else break;
+          nx += dx; ny += dy;
+        }
+      }
+      return false;
+    }
+
+    function placeDisc(x, y, player) {
+      if (!isValidMove(x, y, player)) return false;
+      history.push({ board: board.map(r => r.slice()), player: currentPlayer });
+      board[y][x] = player;
+      const opponent = player === 1 ? 2 : 1;
+      const directions = [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
+      for (const [dx, dy] of directions) {
+        let nx = x + dx, ny = y + dy, cells = [];
+        while (nx >= 0 && ny >= 0 && nx < size && ny < size) {
+          if (board[ny][nx] === opponent) cells.push([nx, ny]);
+          else if (board[ny][nx] === player) {
+            cells.forEach(([fx, fy]) => board[fy][fx] = player);
+            break;
+          } else break;
+          nx += dx; ny += dy;
+        }
+      }
+      return true;
+    }
+
+    function updateTurnIndicator() {
+      const indicator = document.getElementById('turnIndicator');
+      const map = {
+        ja: {1: '次の手: 黒', 2: '次の手: 白'},
+        en: {1: 'Next: Black', 2: 'Next: White'}
+      };
+      indicator.textContent = map[currentLang][currentPlayer];
+    }
+
+    canvas.addEventListener('click', e => {
+      const { x, y } = getCell(e);
+      if (placeDisc(x, y, currentPlayer)) {
+        currentPlayer = currentPlayer === 1 ? 2 : 1;
+        drawBoard();
+        updateTurnIndicator();
+      }
+    });
+
+    document.getElementById('undoButton').addEventListener('click', () => {
+      if (history.length) {
+        const last = history.pop();
+        board = last.board.map(r => r.slice());
+        currentPlayer = last.player;
+        drawBoard();
+        updateTurnIndicator();
+      }
+    });
+
+    document.getElementById('langJa').addEventListener('click', () => setLang('ja'));
+    document.getElementById('langEn').addEventListener('click', () => setLang('en'));
+
+    function setLang(lang) {
+      currentLang = lang;
+      updateTexts();
+      updateTurnIndicator();
+    }
+
+    function updateTexts() {
+      document.getElementById('undoButton').textContent = texts[currentLang].undo;
+      document.getElementById('langJa').style.display = currentLang === 'en' ? 'inline-flex' : 'none';
+      document.getElementById('langEn').style.display = currentLang === 'ja' ? 'inline-flex' : 'none';
+    }
+
+    // 初期表示
+    updateTexts();
+    drawBoard();
+    updateTurnIndicator();
+  </script>
+</body>
+</html>
